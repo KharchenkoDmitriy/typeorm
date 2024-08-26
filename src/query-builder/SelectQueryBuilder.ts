@@ -3460,6 +3460,32 @@ export class SelectQueryBuilder<Entity extends ObjectLiteral>
 
             const originalQuery = this.clone()
 
+            const subqueryDisctincOn = metadata.primaryColumns.map((primaryColumn) => {
+                const alias = DriverUtils.buildAlias(
+                    this.connection.driver,
+                    undefined,
+                    mainAliasName,
+                    primaryColumn.databaseName,
+                );
+
+                return `${this.escape(alias)}`;
+            });
+            const subqueryOrder = subqueryDisctincOn.reduce((orderBy, alias) => {
+                    if (!originalQuery.expressionMap.allOrderBys[alias]) {
+                        orderBy[alias] = "ASC";
+                    } else {
+                        orderBy[alias] = originalQuery.expressionMap.allOrderBys[alias]
+                    }
+                    return orderBy;
+                }, {})
+
+            Object.keys(originalQuery.expressionMap.allOrderBys).forEach(
+                (columnName) => {
+                    if(!subqueryOrder[columnName])
+                        subqueryOrder[columnName] = originalQuery.expressionMap.allOrderBys[columnName];
+                }
+            )
+
             // preserve original timeTravel value since we set it to "false" in subquery
             const originalQueryTimeTravel =
                 originalQuery.expressionMap.timeTravel
@@ -3468,11 +3494,13 @@ export class SelectQueryBuilder<Entity extends ObjectLiteral>
                 this.connection,
                 queryRunner,
             )
-                .select(`DISTINCT ${querySelects.join(", ")}`)
+                .select(`${querySelects.join(", ")}`)
                 .addSelect(selects)
                 .from(
                     `(${originalQuery
-                        .orderBy()
+                        .distinct(true)
+                        .distinctOn(subqueryDisctincOn)
+                        .orderBy(subqueryOrder)
                         .timeTravelQuery(false) // set it to "false" since time travel clause must appear at the very end and applies to the entire SELECT clause.
                         .getQuery()})`,
                     "distinctAlias",
